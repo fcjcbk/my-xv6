@@ -4,7 +4,7 @@
 #include "kernel/fs.h"
 
 char*
-fmtname(char *path)
+fmtname(char *path)     //get the file name wothout directory
 {
   static char buf[DIRSIZ+1];
   char *p;
