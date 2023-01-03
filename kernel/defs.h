@@ -64,6 +64,7 @@ void*           kalloc(void);
 void            kfree(void *);
 void            kinit(void);
 void            add_count(void*);
+uint64          copy_page_if_count(uint64);
 
 // log.c
 void            initlog(int, struct superblock*);
@@ -172,6 +173,7 @@ int             copyout(pagetable_t, uint64, char *, uint64);
 int             copyin(pagetable_t, char *, uint64, uint64);
 int             copyinstr(pagetable_t, char *, uint64, uint64);
 pte_t*          walk(pagetable_t pagetable, uint64 va, int alloc);
+int             deal_COW_trap(pte_t* pte, pagetable_t pagetable, uint64 va);
 
 // plic.c
 void            plicinit(void);

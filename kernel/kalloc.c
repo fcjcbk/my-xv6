@@ -18,18 +18,23 @@ struct run {
   struct run *next;
 };
 
+// #define PAGE_MAX (PHYSTOP - KERNBASE) / PGSIZE
+#define PAGE_MAX PHYSTOP / PGSIZE + 1
 struct {
   struct spinlock lock;
+  struct spinlock count_lock;
   struct run *freelist;
-  int ref_count[PHYSTOP / PGSIZE + 1];
+  int ref_count[PAGE_MAX];
+
 } kmem;
 
 void
 kinit()
 {
   initlock(&kmem.lock, "kmem");
+  initlock(&kmem.count_lock, "p_count");
   memset(kmem.ref_count, 0, sizeof(kmem.ref_count));
-  for(int i = 0; i < PHYSTOP / PGSIZE + 1; i++){
+  for(int i = 0; i < PAGE_MAX; i++){
     kmem.ref_count[i] = 1;
   }
   freerange(end, (void*)PHYSTOP);
@@ -56,7 +61,8 @@ kfree(void *pa)
   if(((uint64)pa % PGSIZE) != 0 || (char*)pa < end || (uint64)pa >= PHYSTOP)
     panic("kfree");
 
-  acquire(&kmem.lock);
+  // acquire(&kmem.lock);
+  acquire(&kmem.count_lock);
   kmem.ref_count[(uint64)pa / PGSIZE]--;
   if(kmem.ref_count[(uint64)pa / PGSIZE] == 0){
     // Fill with junk to catch dangling refs.
@@ -64,12 +70,13 @@ kfree(void *pa)
 
     r = (struct run*)pa;
 
-    // acquire(&kmem.lock);
+    acquire(&kmem.lock);
     r->next = kmem.freelist;
     kmem.freelist = r;
-    // release(&kmem.lock);
+    release(&kmem.lock);
   }
-  release(&kmem.lock);
+  release(&kmem.count_lock);
+  // release(&kmem.lock);
 
   
 }
@@ -86,18 +93,37 @@ kalloc(void)
   r = kmem.freelist;
   if(r){
     kmem.freelist = r->next;
-    kmem.ref_count[(uint64)r / PGSIZE] = 1;
   }
   release(&kmem.lock);
 
-  if(r)
+  if(r){
     memset((char*)r, 5, PGSIZE); // fill with junk
+    // acquire(&kmem.count_lock);
+    kmem.ref_count[(uint64)r / PGSIZE] = 1;
+    // release(&kmem.count_lock);
+  }
   return (void*)r;
 }
 
 void add_count(void * pa){
-  acquire(&kmem.lock);
+  acquire(&kmem.count_lock);
   kmem.ref_count[(uint64)pa / PGSIZE]++;
-  release(&kmem.lock);
+  release(&kmem.count_lock);
 
+}
+
+uint64 copy_page_if_count(uint64 pa){
+  acquire(&kmem.count_lock);
+  if(kmem.ref_count[(uint64)pa / PGSIZE] > 1){
+    char* mem;
+    if((mem = kalloc()) == 0){
+      release(&kmem.count_lock);
+      return 0;
+    }
+    memmove(mem, (char*)pa, PGSIZE);
+    kmem.ref_count[(uint64)pa / PGSIZE]--;
+    pa = (uint64)mem;
+  }
+  release(&kmem.count_lock);
+  return pa;
 }

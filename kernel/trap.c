@@ -51,30 +51,38 @@ usertrap(void)
   p->trapframe->epc = r_sepc();
   if(r_scause() == 12 || r_scause() == 13 || r_scause() == 15){
     pte_t* pte;
-    char* mem;
-    uint64 pa;
-    uint flags;
+    // uint64 mem;
+    // uint64 pa;
+    // uint flags;
+    uint64 va;
     if(r_stval() >= MAXVA){
       exit(-1);
     }
-    // printf("begin\n");
-    if((pte = walk(p->pagetable, r_stval(), 0)) == 0){
+    va = r_stval();
+    if((pte = walk(p->pagetable, va, 0)) == 0){
       exit(-1);
     }
-    // printf("end\n");
-    if(*pte & PTE_C){
-      if((mem = kalloc()) == 0){
+    if((*pte & PTE_C) && (*pte & PTE_V)){
+      
+      // pa = PTE2PA(*pte);
+      // if((mem = copy_page_if_count(pa)) == 0){
+      //   p->killed = 1;
+      //   exit(-1);
+      // }
+      // flags = PTE_FLAGS(*pte);
+      // flags ^= PTE_C;
+      // flags |= PTE_W;
+      // uvmunmap(p->pagetable, PGROUNDDOWN(va), 1, 0);
+      // *pte = PA2PTE(mem) | flags;
+      // if(mappages(p->pagetable, va, 1, mem, flags) != 0){
+      //   exit(-1);
+      // }
+      if(deal_COW_trap(pte, p->pagetable, va) == 0){
+        intr_on();
+      }else{
         p->killed = 1;
-        exit(-1);
       }
-      pa = PTE2PA(*pte);
-      memmove(mem, (char*)pa, PGSIZE);
-      flags = PTE_FLAGS(*pte);
-      flags ^= PTE_C;
-      flags |= PTE_W;
-      *pte = PA2PTE(mem) | flags;
-      kfree((uint64*)pa);
-      intr_on();
+
     }else{
       printf("usertrap(): unexpected scause %p pid=%d\n", r_scause(), p->pid);
       printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());
