@@ -367,22 +367,22 @@ copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
     }
     if((*pte & PTE_C) && (*pte & PTE_V) && (*pte & PTE_U)){
       
-      uint64 mem;
-      uint64 pa;
-      uint64 flags;
-      pa = PTE2PA(*pte);
-      if((mem = copy_page_if_count(pa)) == 0){
-        return -1;
-      }
-      flags = PTE_FLAGS(*pte);
-      flags ^= PTE_C;
-      flags |= PTE_W;
-      *pte = PA2PTE(mem) | flags;
-      // uvmunmap(pagetable, PGROUNDDOWN(va0), 1, 0);
-      
-      // if(deal_COW_trap(pte, pagetable, va0) != 0){
+      // uint64 mem;
+      // uint64 pa;
+      // uint64 flags;
+      // pa = PTE2PA(*pte);
+      // if((mem = copy_page_if_count(pa)) == 0){
       //   return -1;
       // }
+      // flags = PTE_FLAGS(*pte);
+      // flags ^= PTE_C;
+      // flags |= PTE_W;
+      // *pte = PA2PTE(mem) | flags;
+      // uvmunmap(pagetable, PGROUNDDOWN(va0), 1, 0);
+      
+      if(deal_COW_trap(pte, pagetable, va0) != 0){
+        return -1;
+      }
     }
     pa0 = PTE2PA(*pte);
     if(pa0 == 0)
@@ -481,7 +481,8 @@ int deal_COW_trap(pte_t* pte, pagetable_t pagetable, uint64 va){
   flags |= PTE_W;
   uvmunmap(pagetable, PGROUNDDOWN(va), 1, 0);
   
-  if(mappages(pagetable, va, 1, mem, flags) != 0){
+  if(mappages(pagetable, PGROUNDDOWN(va), PGSIZE, mem, flags) != 0){
+    kfree((void*)mem);
     return -1;
   }
   return 0;
