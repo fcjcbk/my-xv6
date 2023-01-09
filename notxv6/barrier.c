@@ -6,7 +6,7 @@
 
 static int nthread = 1;
 static int round = 0;
-
+int round1  = 0;
 struct barrier {
   pthread_mutex_t barrier_mutex;
   pthread_cond_t barrier_cond;
@@ -30,7 +30,35 @@ barrier()
   // Block until all threads have called barrier() and
   // then increment bstate.round.
   //
-  
+
+  // pthread_mutex_lock(&bstate.barrier_mutex);
+  // bstate.nthread++;
+  // while (bstate.nthread != nthread) {
+  //   pthread_cond_wait(&bstate.barrier_cond, &bstate.barrier_mutex);
+  // }
+  // round1++;
+  // if (round1 == nthread){
+  //   round1 = 0;
+  //   bstate.round++;
+  //   bstate.nthread = 0;
+  // }
+  // pthread_cond_broadcast(&bstate.barrier_cond);
+
+  // while (round1 != 0) {
+  //   pthread_cond_wait(&bstate.barrier_cond, &bstate.barrier_mutex);
+  // }
+  // pthread_cond_broadcast(&bstate.barrier_cond);
+  // pthread_mutex_unlock(&bstate.barrier_mutex);
+
+  pthread_mutex_lock(&bstate.barrier_mutex);
+  if(++bstate.nthread != nthread){
+      pthread_cond_wait(&bstate.barrier_cond, &bstate.barrier_mutex);
+  }else{
+    pthread_cond_broadcast(&bstate.barrier_cond);
+    bstate.round++;
+    bstate.nthread = 0;
+  }
+  pthread_mutex_unlock(&bstate.barrier_mutex);  
 }
 
 static void *
@@ -41,7 +69,7 @@ thread(void *xa)
   int i;
 
   for (i = 0; i < 20000; i++) {
-    int t = bstate.round;
+    int t = bstate.round;    
     assert (i == t);
     barrier();
     usleep(random() % 100);
