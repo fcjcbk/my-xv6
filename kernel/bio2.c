@@ -26,7 +26,7 @@
 #define NBUCKET 13
 
 struct {
-  struct spinlock lock[NBUCKET];
+  struct spinlock lock;
   struct buf buf[NBUF];
   struct buf table[NBUCKET];
   struct spinlock locks[NBUCKET];
@@ -72,7 +72,6 @@ bwrite(struct buf *b)
 
 // Release a locked buffer.
 // Move to the head of the most-recently-used list.
-
 void
 brelse(struct buf *b)
 {
@@ -117,7 +116,7 @@ bget(uint dev, uint blockno)
   // Recycle the least recently used (LRU) unused buffer.
 
 
-  acquire(&bcache.lock[index]);
+  acquire(&bcache.lock);
 
   for(b = bcache.table[index].next; b != 0; b = b->next){
     if(b->dev == dev && b->blockno == blockno){
@@ -126,49 +125,47 @@ bget(uint dev, uint blockno)
 
       // printf("bget release lock %d\n", index);
       release(&bcache.locks[index]);
-      release(&bcache.lock[index]);   
+      release(&bcache.lock);   
       acquiresleep(&b->lock);
       return b;
     }
   }
 
-  struct buf *prev = 0;
-  int n_index = -1;
+  struct buf *before_least = 0;
+  int holding_bucket = -1;
 
   for(int i = 0; i < NBUCKET; i++){
     acquire(&bcache.locks[i]);
-
-    for(b = &bcache.table[i];  b->next != 0; b = b->next){
-      if(b->next->refcnt == 0){
-        if(n_index == -1){
-          n_index = i;
-          prev = b;
-        }else if(b->next->lastuse < prev->lastuse){
-          if(n_index != i){
-            release(&bcache.locks[n_index]);
-            n_index = i;
-          }
-          prev = b;
-        }
+    int newfound = 0;
+    for(b = &bcache.table[i]; b->next != 0; b = b->next){
+      if(b->next->refcnt == 0 && (!before_least || b->next->lastuse < before_least->next->lastuse)){
+        before_least = b;
+        newfound = 1;
       }
     }
-    if(n_index != i){
+    if(!newfound){
       release(&bcache.locks[i]);
+    }else{
+      if(holding_bucket != -1){
+        release(&bcache.locks[holding_bucket]);
+      }
+      holding_bucket = i;
     }
   }
-  if(prev == 0){
+
+  if(!before_least){
     panic("bget");
   }
-  b = prev->next;
-  if(n_index != index){
-    prev->next = b->next;
-    release(&bcache.locks[n_index]);
-    
+  b = before_least->next;
+  
+  if(holding_bucket != index){
+    before_least->next = b->next;
+    release(&bcache.locks[holding_bucket]);
     acquire(&bcache.locks[index]);
     b -> next = bcache.table[index].next;
     bcache.table[index].next = b;
+
   }
-  
   b->dev = dev;
   b->blockno = blockno;
   b->valid = 0;
@@ -180,7 +177,7 @@ bget(uint dev, uint blockno)
   release(&bcache.locks[index]);
   
   // printf("bget release global lock\n");
-  release(&bcache.lock[index]);
+  release(&bcache.lock);
 
   acquiresleep(&b->lock);
   return b;
@@ -191,12 +188,10 @@ binit(void)
 {
   struct buf *b;
 
+  initlock(&bcache.lock, "bcache");
   for(int i = 0; i < NBUCKET; i++){
-    char buffers[16];
-    snprintf(buffers, 1, PATTERN, i);
-    initlock(&bcache.locks[i], buffers);
+    initlock(&bcache.locks[i], "buffe");
     bcache.table[i].next = 0;
-    initlock(&bcache.lock[i], "bcache");
   }
 
   // Create linked list of buffers
@@ -231,3 +226,4 @@ bunpin(struct buf *b) {
   b->refcnt--;
   release(&bcache.locks[index]);
 }
+
