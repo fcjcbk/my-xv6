@@ -26,7 +26,7 @@
 #define NBUCKET 13
 
 struct {
-  struct spinlock lock[NBUCKET];
+  struct spinlock evict_lock[NBUCKET];
   struct buf buf[NBUF];
   struct buf table[NBUCKET];
   struct spinlock locks[NBUCKET];
@@ -117,7 +117,7 @@ bget(uint dev, uint blockno)
   // Recycle the least recently used (LRU) unused buffer.
 
 
-  acquire(&bcache.lock[index]);
+  acquire(&bcache.evict_lock[index]);
 
   for(b = bcache.table[index].next; b != 0; b = b->next){
     if(b->dev == dev && b->blockno == blockno){
@@ -126,7 +126,7 @@ bget(uint dev, uint blockno)
 
       // printf("bget release lock %d\n", index);
       release(&bcache.locks[index]);
-      release(&bcache.lock[index]);   
+      release(&bcache.evict_lock[index]);   
       acquiresleep(&b->lock);
       return b;
     }
@@ -180,7 +180,7 @@ bget(uint dev, uint blockno)
   release(&bcache.locks[index]);
   
   // printf("bget release global lock\n");
-  release(&bcache.lock[index]);
+  release(&bcache.evict_lock[index]);
 
   acquiresleep(&b->lock);
   return b;
@@ -196,7 +196,7 @@ binit(void)
     snprintf(buffers, 1, PATTERN, i);
     initlock(&bcache.locks[i], buffers);
     bcache.table[i].next = 0;
-    initlock(&bcache.lock[i], "bcache");
+    initlock(&bcache.evict_lock[i], "bcache");
   }
 
   // Create linked list of buffers
