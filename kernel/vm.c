@@ -432,3 +432,30 @@ copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
     return -1;
   }
 }
+
+int is_dirty(pagetable_t pg, uint64 va) {
+  pte_t* pte = walk(pg, va, 0);
+  if (pte != 0) {
+    if ((*pte & PTE_D) && (*pte & PTE_V)) {
+      return 1;
+    }
+  }
+  return 0;
+}
+
+// n is the num of pages be freed
+int help_uvmmap (pagetable_t pg, uint64 va, int num) {
+  pte_t* pte = 0;
+  int count = 0;
+  for (int i = 0; i < num; i++) {
+    pte = walk(pg, va, 0);
+    if (pte != 0) {
+      if (*pte & PTE_V) {
+        uvmunmap(pg, PGROUNDUP(va), 1, 1);  
+        count++;
+      }
+    }
+    va += PGSIZE;
+  }
+  return count;
+}

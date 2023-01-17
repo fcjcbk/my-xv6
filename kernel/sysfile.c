@@ -15,6 +15,7 @@
 #include "sleeplock.h"
 #include "file.h"
 #include "fcntl.h"
+#include "memlayout.h"
 
 // Fetch the nth word-sized system call argument as a file descriptor
 // and return both the descriptor and the corresponding struct file.
@@ -483,4 +484,142 @@ sys_pipe(void)
     return -1;
   }
   return 0;
+}
+
+uint64
+sys_mmap(void)
+{
+  struct vma v;
+  struct proc *p;
+  int i = -1;
+  struct file *f;
+  uint64 vaend;
+  if (argint(1, &v.length) < 0 || argint(2, &v.prot) || argint(3, &v.flag) < 0 || argfd(4, 0, &f) < 0) {
+    return -1;
+  }
+  if ((v.prot & PROT_READ) && !f->readable) {
+    return -1;
+  }
+  if (((v.flag & MAP_SHARED) && (v.prot & PROT_WRITE) && !f->writable)) {
+    return -1;
+  }
+  vaend = MMAPEND;
+  p = myproc();
+  for (int t = 0; t < VMASZ; t++) {
+    if (p->vmas[t].vastart == 0) {
+      i = t;
+    } else {
+      if (p->vmas[t].vastart < vaend){
+        vaend = p->vmas[t].vastart;
+      }
+    }
+  }
+  if (i == -1) {
+    return -1;
+  }
+  v.file = filedup(f);
+  v.vastart = PGROUNDDOWN(vaend - v.length);
+  v.pages = 0;
+  p->vmas[i] = v;
+  return v.vastart;
+}
+
+uint64
+sys_munmap(void)
+{
+  uint64 addr;
+  int length;
+  struct vma *v = 0;
+  if (argaddr(0, &addr) < 0 || argint(1, &length) < 0) {
+    return -1;
+  }
+  struct proc *p = myproc();
+  for (int i = 0; i < VMASZ; i++) {
+    // printf("addr1: %p length: %d\n", p->vmas[i].vastart, p->vmas[i].length);
+    if (p->vmas[i].vastart != 0 && addr >= p->vmas[i].vastart && addr < p->vmas[i].vastart + length) {
+      v = &p->vmas[i];
+      break;
+    }
+  }
+  // printf("addr: %p length: %d\n", addr, length);
+  if (v == 0) {
+    return -1;
+  }
+
+  if (addr >= v->vastart && addr +length > v->vastart + v->length) {
+    return -1;
+  }
+  // printf("addr1: %p length1: %d\n", v->vastart, v->length);
+  // printf("align addr %p\n", PGROUNDUP(addr));
+  
+  uint n = length / PGSIZE;
+  if (length % PGSIZE != 0) {
+    n++;
+  }
+  // printf("n: %d\n", n);
+  // printf("v->pages: %d\n", v->pages);
+  if ((v->flag & MAP_SHARED) && (v->prot & PROT_WRITE)) {
+      for (int i = 0; i < n; i++) {
+        if (is_dirty(p->pagetable, PGROUNDDOWN(addr + PGSIZE * i)) == 0) {
+          continue;
+        }
+        if (filewrite(v->file, PGROUNDDOWN(addr + PGSIZE * i), PGSIZE) != PGSIZE) {
+          return -1;
+        }  
+      }
+      
+  } 
+  
+  v->pages -= help_uvmmap(p->pagetable, addr, n);
+  // uvmunmap(p->pagetable, PGROUNDUP(addr), n, 1);
+  if (addr == v->vastart) {
+    v->vastart += length;
+  }
+  v->length -= length;
+  if (v->length <= 0) {
+    v->vastart = 0;
+    fileclose(v->file);
+  }
+
+  return 0;
+}
+
+int handle_mmap(struct vma *v, pagetable_t pg){
+  char *mem;
+  if((mem = kalloc()) == 0){
+    panic("handle_mmap: kalloc");
+  }
+  memset(mem, 0, PGSIZE);
+  struct inode* ip = v->file->ip;
+  uint offset = (r_stval() - v->vastart) / PGSIZE * PGSIZE;
+  begin_op();
+  ilock(ip);
+
+  if (readi(ip, 0, (uint64)mem, offset, PGSIZE) <= 0) {
+    iunlock(ip);
+    end_op();
+    goto bad;
+  }
+  int port = PTE_U;
+  if(v->prot & PROT_READ){
+    port |= PTE_R;
+  }
+  if(v->prot & PROT_WRITE){
+    port |= PTE_W;
+    
+  }
+  end_op();
+  iunlock(ip);
+  
+  // printf("mmap: %p\n", )
+  if(mappages(pg, PGROUNDDOWN(v->vastart + offset), PGSIZE, (uint64)mem, port) != 0){
+    goto bad;
+  }
+  v->pages++;
+  return 0;
+
+bad:
+  kfree(mem);
+  return -1;
+
 }

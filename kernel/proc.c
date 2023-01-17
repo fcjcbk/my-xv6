@@ -5,6 +5,7 @@
 #include "spinlock.h"
 #include "proc.h"
 #include "defs.h"
+#include "fcntl.h"
 
 struct cpu cpus[NCPU];
 
@@ -141,6 +142,7 @@ found:
   p->context.ra = (uint64)forkret;
   p->context.sp = p->kstack + PGSIZE;
 
+  memset(&p->vmas, 0, sizeof(struct vma) * VMASZ);
   return p;
 }
 
@@ -164,6 +166,9 @@ freeproc(struct proc *p)
   p->killed = 0;
   p->xstate = 0;
   p->state = UNUSED;
+  for (int i = 0; i < VMASZ; i++) {
+    p->vmas[i].vastart = 0;
+  }
 }
 
 // Create a user page table for a given process,
@@ -281,6 +286,15 @@ fork(void)
     return -1;
   }
 
+    // copy mmap area
+  for (int i = 0; i < VMASZ; i++) {
+    if (p->vmas[i].vastart != 0) {
+      np->vmas[i] = p->vmas[i];
+      filedup(p->vmas[i].file);
+    
+    }
+  }
+
   // Copy user memory from parent to child.
   if(uvmcopy(p->pagetable, np->pagetable, p->sz) < 0){
     freeproc(np);
@@ -353,6 +367,29 @@ exit(int status)
     }
   }
 
+  for (int i = 0; i < VMASZ; i++) {
+    if (p->vmas[i].vastart != 0) {
+        struct vma *v = &p->vmas[i];
+        uint n = v->length / PGSIZE;
+        if (v->length % PGSIZE != 0) {
+          n++;
+        }
+        if ((v->flag & MAP_SHARED) && (v->prot & PROT_WRITE)) {
+            for (int i = 0; i < n; i++) {
+              if (is_dirty(p->pagetable, PGROUNDDOWN(v->vastart + PGSIZE * i)) == 0) {
+                continue;
+              }
+              if (filewrite(v->file, PGROUNDDOWN(v->vastart + PGSIZE * i), PGSIZE) != PGSIZE) {
+                panic("exit: filewrite");
+              }  
+            }  
+        } 
+        help_uvmmap(p->pagetable, v->vastart, n);
+        v->vastart = 0;
+        fileclose(v->file);
+        
+    }
+  }
   begin_op();
   iput(p->cwd);
   end_op();

@@ -50,7 +50,28 @@ usertrap(void)
   // save user program counter.
   p->trapframe->epc = r_sepc();
   
-  if(r_scause() == 8){
+  int i;
+  if(r_scause() == 15 || r_scause() == 13){
+    for(i = 0; i < VMASZ; i++){
+      if(p->vmas[i].vastart != 0){
+        if(r_stval() >= p->vmas[i].vastart && r_stval() < p->vmas[i].vastart + p->vmas[i].length){
+          break;
+        }
+      }
+    }
+
+    if(i != VMASZ){
+      if(handle_mmap(&p->vmas[i], p->pagetable) < 0){
+        printf("usertrap(): unexpected scause %p pid=%d\n", r_scause(), p->pid);
+        printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());
+        p->killed = 1;
+      }
+    }else{
+      printf("usertrap(): unexpected scause %p pid=%d\n", r_scause(), p->pid);
+      printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());
+      p->killed = 1;
+    }
+  }else if(r_scause() == 8){
     // system call
 
     if(p->killed)
